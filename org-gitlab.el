@@ -104,6 +104,20 @@
     (org-entry-put headline-pos org-gitlab-property-iid iid)
     (message "Issue has bound successfully")))
 
+(defun org-gitlab--parse-duration (duration)
+  (let ((hour-minute (split-string duration ":")))
+    (format "%sh %sm" (car hour-minute) (cadr hour-minute))))
+
+(defun org-gitlab--find-last-clocked ()
+  (let ((heading) (clock) (clock-marker (car org-clock-history)))
+    (switch-to-buffer (marker-buffer clock-marker))
+    (setq heading (org-element-at-point clock-marker))
+    (goto-char clock-marker)
+    (when (re-search-forward "^CLOCK: .* =>  " nil t)
+      (setq clock (org-element-at-point (point-at-bol)))
+      (cons (org-element-property :raw-value heading)
+	    (org-element-property :duration clock)))))
+
 (defun org-gitlab-get-url ()
   "get issue url"
   (let ((headline-pos) (headline (org-gitlab--get-headline)) (pid) (iid))
@@ -229,3 +243,25 @@
 			(if (length= data 0)
 			    (message "Not found any issue")
 			  (message "More then one issue found"))))))))))
+
+(defun org-gitlab-log-last-clocked ()
+  "Log last clocked duration as spent time on remote"
+  (interactive)
+  (save-excursion
+    (let ((clocked (org-gitlab--find-last-clocked))
+	  (org-gitlab-url)
+	  (data))
+      (setq org-gitlab-url (org-gitlab-get-url))
+      (when (and org-gitlab-url clocked)
+	(add-to-list 'data (cons "summary" (car clocked)))
+	(add-to-list 'data (cons "duration" (org-gitlab--parse-duration (cdr clocked))))
+	(message (format "Logging time: %s" clocked))
+	(request (concat org-gitlab-url "/add_spent_time")
+	  :type "POST"
+	  :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+			 '("Content-Type" . "application/json"))
+	  :data (json-encode data)
+	  :parser 'json-read
+	  :success (cl-function
+		    (lambda (&key data &allow-other-keys)
+		      (message (format "Total logged: %s" (alist-get 'human_total_time_spent data))))))))))
