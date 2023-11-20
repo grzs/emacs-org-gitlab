@@ -1,0 +1,231 @@
+(defconst org-gitlab-property-pid "GITLAB_PROJECT_ID"
+  "Gitlab project ID")
+
+(defconst org-gitlab-property-iid "GITLAB_ISSUE_ID"
+  "Gitlab issue ID")
+
+(defconst org-gitlab-description-header "#+NAME: GITLAB_DESCRIPTION")
+(defconst org-gitlab-description-re "^#\\+NAME: GITLAB_DESCRIPTION$")
+
+(defconst org-gitlab-token
+  (alist-get 'org-sync-gitlab-auth-token safe-local-variable-values)
+  "Get gitlab token from safe-local-variable-values")
+
+ (defun org-gitlab--get-project-id ()
+  "get main property project ID"
+  (save-excursion
+    (goto-char 0)
+    (unless (org-at-heading-p)
+      (org-entry-get 0 org-gitlab-property-pid))))
+
+(defun org-gitlab--set-project-id (pid)
+  "set main property project ID"
+  (when pid
+    (if (numberp pid) (setq pid (number-to-string pid)))
+    (save-excursion
+      (goto-char 0)
+      (when (org-at-heading-p)
+	(insert "\n") (goto-char 0))
+      (org-entry-put 0 org-gitlab-property-pid pid))))
+
+(defun org-gitlab--go-to-main-header ()
+  (org-heading-components))
+
+(defun org-gitlab--get-headline ()
+  "get main headline"
+  ;; TODO: empty parapgraph
+  (let ((headline
+	 (car (last (org-element-lineage (org-element-at-point)) 2))))
+    (if (eq (org-element-type headline) 'headline)
+	headline
+      (if (org-at-heading-p)
+	  (org-element-at-point)))))
+
+(defun org-gitlab-get-title ()
+  "get title"
+  (let ((headline (org-gitlab--get-headline)))
+    (if headline (org-element-property :raw-value headline))))
+
+(defun org-gitlab-set-title (title)
+  "set title to TITLE"
+  (save-excursion
+    (let ((headline (org-gitlab--get-headline)))
+      (goto-char (org-element-property :begin headline))
+      (org-edit-headline title))))
+
+(defun org-gitlab-set-web-url (url)
+  "Set web URL as a property"
+  (let ((headline (org-gitlab--get-headline)))
+    (when headline
+      (org-entry-put (org-element-property :begin headline) "GITLAB_WEB_URL" url))))
+  
+(defun org-gitlab--get-description-src-block ()
+  "get gitlab description source block element"
+  (let ((headline (org-gitlab--get-headline)))
+    (when headline
+      (org-next-visible-heading 1)
+      (backward-char)
+      (when (re-search-backward org-gitlab-description-re (org-element-property :begin headline) t)
+	(forward-line)
+	(org-element-src-block-parser nil nil)))))
+
+(defun org-gitlab-get-description ()
+  "get gitlab description"
+  (save-excursion
+    (let ((description-element (org-gitlab--get-description-src-block)))
+      (if description-element (org-element-property :value description-element)))))
+
+(defun org-gitlab--create-description-header ()
+  "Create description header"
+  (let ((headline (org-gitlab--get-headline)))
+    (when headline
+      (goto-char (org-element-property :begin headline))
+      (forward-line)
+      (if (org-at-property-drawer-p)
+	  (goto-char (org-element-property :end (org-element-at-point))))
+      (insert (concat org-gitlab-description-header "\n")))))
+
+(defun org-gitlab-set-description (description)
+  "set description to DESCRIPTION"
+  (save-excursion
+    (let ((description-element (org-gitlab--get-description-src-block)))
+      (if description-element
+	  (delete-region (point) (org-element-property :end description-element))
+	(org-gitlab--create-description-header))
+      (insert (concat "#+BEGIN_SRC markdown\n"
+		      description "\n"
+		      "#+END_SRC\n\n")))))
+
+(defun org-gitlab--set-ids (pid iid)
+  "Set ids as properties: PID, IID"
+  (message pid iid)
+  (let ((headline-pos (org-element-property :begin (org-gitlab--get-headline))))
+    (org-entry-put headline-pos org-gitlab-property-pid pid)
+    (org-entry-put headline-pos org-gitlab-property-iid iid)
+    (message "Issue has bound successfully")))
+
+(defun org-gitlab-get-url ()
+  "get issue url"
+  (let ((headline-pos) (headline (org-gitlab--get-headline)) (pid) (iid))
+    (when headline
+      (setq headline-pos (org-element-property :begin headline))
+      (setq pid
+	    (org-entry-get headline-pos org-gitlab-property-pid))
+      (setq iid
+	    (org-entry-get headline-pos org-gitlab-property-iid))
+      (if (and pid iid)
+	  (concat org-gitlab-base-url "/projects/" pid "/issues/" iid)))))
+
+(defun org-gitlab--update-project-info (data)
+  (org-gitlab--set-project-id (alist-get 'id data))
+  (org-entry-put 0 "GITLAB_PROJECT_NAME" (alist-get 'name data))
+  (org-entry-put 0 "GITLAB_PROJECT_REPO_URL" (alist-get 'ssh_url_to_repo data))
+  (org-entry-put 0 "GITLAB_PROJECT_WEB_URL" (alist-get 'web_url data))
+  (message "Project info updated"))
+
+;; Requests
+
+(defun org-gitlab-project-search (name)
+  "Search project by name, update if found only one"
+  (interactive "sname: ")
+  (request (concat org-gitlab-base-url
+		   "/projects?&search=" (url-encode-url name) "&in=name")
+    :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+    :parser 'json-read
+    :success (cl-function
+	      (lambda (&key data &allow-other-keys)
+		(if (length= data 1)
+		    (org-gitlab--update-project-info (elt data 0))
+		  (if (length= data 0)
+		      (message "Not found any project")
+		    (message "More then one project found")))))))
+
+(defun org-gitlab-project-info-update ()
+  "Update project info as file properties"
+  (interactive)
+  (let ((pid (org-gitlab--get-project-id)))
+    (unless pid
+      (setq pid (read-string "pid: "))
+      (org-gitlab--set-project-id pid))
+    (save-excursion
+      (goto-char 0)
+      (when (org-at-heading-p)
+	(insert "\n") (goto-char 0))
+      (org-entry-put 0 org-gitlab-property-pid pid))
+    (request (concat org-gitlab-base-url "/projects/" pid)
+      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+      :parser 'json-read
+      :success (cl-function
+		(lambda (&key data &allow-other-keys)
+		  (org-gitlab--update-project-info data))))))
+
+(defun org-gitlab-pull ()
+  "Get description and title from remote"
+  (interactive)
+  (let ((org-gitlab-url (org-gitlab-get-url)))
+    (when org-gitlab-url
+      (request org-gitlab-url
+	:headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+	:parser 'json-read
+	:success (cl-function
+		  (lambda (&key data &allow-other-keys)
+		    (org-gitlab-set-title (alist-get 'title data))
+		    (org-gitlab-set-description (alist-get 'description data))
+		    (org-gitlab-set-web-url (alist-get 'web_url data))
+		    (message "Pulled successfully")))))))
+
+(defun org-gitlab-push ()
+  "Push dscription and title to remote"
+  (interactive)
+  (let ((org-gitlab-url (org-gitlab-get-url))
+	(title (org-gitlab-get-title))
+	(description (org-gitlab-get-description))
+	(data))
+    (when org-gitlab-url
+      (if title (add-to-list 'data (cons "title" title)))
+      (if description (add-to-list 'data (cons "description" description)))
+      (request org-gitlab-url
+	:type "PUT"
+	:headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+		       '("Content-Type" . "application/json"))
+	:data (json-encode data)
+	:parser 'json-read
+	:success (cl-function
+		  (lambda (&key data &allow-other-keys)
+		    (message "Pushed successfully")))))))
+
+(defun org-gitlab-bind (iid)
+  "Search by PID and IID"
+  (interactive "niid: ")
+  (let ((pid (org-gitlab--get-project-id)))
+    (unless pid
+      (setq pid (read-string "pid: "))
+      (org-gitlab--set-project-id pid))
+    (request (concat org-gitlab-base-url (format "/projects/%s/issues/%d" pid iid))
+      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+      :parser 'json-read
+      :success (cl-function
+		(lambda (&key data &allow-other-keys)
+		  (org-gitlab--set-ids
+		   (number-to-string (alist-get 'project_id data))
+		   (number-to-string (alist-get 'iid data))))))))
+
+(defun org-gitlab-bind-by-title ()
+  "Search by title and set ids if found only one"
+  (interactive)
+  (save-excursion
+    (let ((title (org-gitlab-get-title)))
+      (when title
+	(request (concat org-gitlab-base-url
+			 "/issues?scope=assigned_to_me&search=" (url-encode-url title) "&in=title")
+	  :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+	  :parser 'json-read
+	  :success (cl-function
+		    (lambda (&key data &allow-other-keys)
+		      (if (length= data 1)
+			  (org-gitlab--set-ids
+			   (number-to-string (alist-get 'project_id (elt data 0)))
+			   (number-to-string (alist-get 'iid (elt data 0))))
+			(if (length= data 0)
+			    (message "Not found any issue")
+			  (message "More then one issue found"))))))))))
