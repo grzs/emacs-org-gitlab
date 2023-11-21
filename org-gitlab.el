@@ -244,18 +244,13 @@
 			    (message "Not found any issue")
 			  (message "More then one issue found"))))))))))
 
-(defun org-gitlab-log-last-clocked ()
-  "Log last clocked duration as spent time on remote"
-  (interactive)
-  (save-excursion
-    (let ((clocked (org-gitlab--find-last-clocked))
-	  (org-gitlab-url)
-	  (data))
-      (setq org-gitlab-url (org-gitlab-get-url))
-      (when (and org-gitlab-url clocked)
-	(add-to-list 'data (cons "summary" (car clocked)))
-	(add-to-list 'data (cons "duration" (org-gitlab--parse-duration (cdr clocked))))
-	(message (format "Logging time: %s" clocked))
+(defun org-gitlab--push-clocked(summary duration)
+  "Push log data to remote"
+  (let ((org-gitlab-url (org-gitlab-get-url))
+	(data))
+	(add-to-list 'data (cons "summary" summary))
+	(add-to-list 'data (cons "duration" (org-gitlab--parse-duration duration)))
+	(message (format "Logging time: %s - %s" summary duration))
 	(request (concat org-gitlab-url "/add_spent_time")
 	  :type "POST"
 	  :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
@@ -264,4 +259,26 @@
 	  :parser 'json-read
 	  :success (cl-function
 		    (lambda (&key data &allow-other-keys)
-		      (message (format "Total logged: %s" (alist-get 'human_total_time_spent data))))))))))
+		      (message (format "Total logged: %s" (alist-get 'human_total_time_spent data))))))))
+
+(defun org-gitlab-log-last-clocked ()
+  "Log last clocked duration as spent time on remote"
+  (interactive)
+  (save-excursion
+    (let ((clocked (org-gitlab--find-last-clocked)))
+      (if clocked (org-gitlab--push-clocked
+		   (car clocked) (cdr clocked))))))
+
+(defun org-gitlab-log-at-point ()
+  "Push duration at point"
+  (interactive)
+  (if (org-at-clock-log-p)
+      (let ((clock-heading-props
+	     (save-excursion (re-search-backward org-heading-regexp)
+			     (cadr (org-element-headline-parser (point-at-eol)))))
+	    (clock-props (cadr (org-element-clock-parser (point-at-eol)))))
+	(if (plist-get clock-props :duration)
+	    (org-gitlab--push-clocked
+	     (plist-get clock-heading-props :raw-value)
+	     (plist-get clock-props :duration))
+	  (message "Clock is still running")))))
