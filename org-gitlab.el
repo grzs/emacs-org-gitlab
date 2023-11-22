@@ -13,8 +13,10 @@
 ;; with a GitLab issue. Currently supported properties:
 ;; title, description, time_estimate, time_spent
 
-(defgroup org-gitlab nil "Org GitLab sync")
 (defvar org-gitlab-base-url nil "Gitlab server URL")
+(defconst org-gitlab-token
+  (alist-get 'org-sync-gitlab-auth-token safe-local-variable-values)
+  "Get gitlab token from safe-local-variable-values")
 
 (defconst org-gitlab-property-pid "GITLAB_PROJECT_ID"
   "Gitlab project ID")
@@ -24,10 +26,6 @@
 
 (defconst org-gitlab-description-header "#+NAME: GITLAB_DESCRIPTION")
 (defconst org-gitlab-description-re "^#\\+NAME: GITLAB_DESCRIPTION$")
-
-(defconst org-gitlab-token
-  (alist-get 'org-sync-gitlab-auth-token safe-local-variable-values)
-  "Get gitlab token from safe-local-variable-values")
 
  (defun org-gitlab--get-project-id ()
   "get main property project ID"
@@ -304,7 +302,7 @@
 	(org-duration-string-to-minutes effort-string))))
 
 (defun org-gitlab--set-effort (minutes)
-  "set effort estimate MINUTES"
+  "set effort estimate to MINUTES"
   (if (numberp minutes) minutes
     (error "MINUTES has to be a number"))
   (save-excursion
