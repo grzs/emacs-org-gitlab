@@ -28,46 +28,44 @@
 	(insert "\n") (goto-char 0))
       (org-entry-put 0 org-gitlab-property-pid pid))))
 
-(defun org-gitlab--go-to-main-header ()
-  (org-heading-components))
-
-(defun org-gitlab--get-headline ()
+(defun org-gitlab--get-headline-props ()
   "get main headline"
   ;; TODO: empty parapgraph
+  (beginning-of-line)
   (let ((headline
 	 (car (last (org-element-lineage (org-element-at-point)) 2))))
     (if (eq (org-element-type headline) 'headline)
-	headline
+	(cadr headline)
       (if (org-at-heading-p)
-	  (org-element-at-point)))))
+	  (cadr (org-element-headline-parser (point-at-eol)))))))
 
 (defun org-gitlab-get-title ()
   "get title"
-  (let ((headline (org-gitlab--get-headline)))
-    (if headline (org-element-property :raw-value headline))))
+  (let ((headline-props (org-gitlab--get-headline-props)))
+    (if headline-props (plist-get headline-props :raw-value))))
 
 (defun org-gitlab-set-title (title)
   "set title to TITLE"
   (save-excursion
-    (let ((headline (org-gitlab--get-headline)))
-      (goto-char (org-element-property :begin headline))
+    (let ((headline-props (org-gitlab--get-headline-props)))
+      (goto-char (plist-get headline-props :begin))
       (org-edit-headline title))))
 
 (defun org-gitlab-set-web-url (url)
   "Set web URL as a property"
-  (let ((headline (org-gitlab--get-headline)))
-    (when headline
-      (org-entry-put (org-element-property :begin headline) "GITLAB_WEB_URL" url))))
+  (let ((headline-props (org-gitlab--get-headline-props)))
+    (when headline-props
+      (org-entry-put (plist-get headline-props :begin) "GITLAB_WEB_URL" url))))
   
 (defun org-gitlab--get-description-src-block ()
   "get gitlab description source block element"
-  (let ((headline (org-gitlab--get-headline)))
-    (when headline
-      (org-next-visible-heading 1)
-      (backward-char)
-      (when (re-search-backward org-gitlab-description-re (org-element-property :begin headline) t)
+  (let ((headline-props (org-gitlab--get-headline-props)))
+    (when headline-props
+      (when (re-search-forward org-gitlab-description-re
+			       (save-excursion (org-next-visible-heading 1) (point))
+			       t)
 	(forward-line)
-	(org-element-src-block-parser nil nil)))))
+	(org-element-src-block-parser (save-excursion (re-search-forward "#\\+END_SRC")) nil)))))
 
 (defun org-gitlab-get-description ()
   "get gitlab description"
@@ -77,9 +75,9 @@
 
 (defun org-gitlab--create-description-header ()
   "Create description header"
-  (let ((headline (org-gitlab--get-headline)))
-    (when headline
-      (goto-char (org-element-property :begin headline))
+  (let ((headline-props (org-gitlab--get-headline-props)))
+    (when headline-props
+      (goto-char (plist-get headline-props :begin))
       (forward-line)
       (if (org-at-property-drawer-p)
 	  (goto-char (org-element-property :end (org-element-at-point))))
@@ -94,25 +92,23 @@
 	(org-gitlab--create-description-header))
       (insert (concat "#+BEGIN_SRC markdown\n"
 		      description "\n"
-		      "#+END_SRC\n\n")))))
+		      "#+END_SRC\n")))))
 
 (defun org-gitlab--set-ids (pid iid)
   "Set ids as properties: PID, IID"
   (message pid iid)
-  (let ((headline-pos (org-element-property :begin (org-gitlab--get-headline))))
+  (let ((headline-pos (org-element-property :begin (org-gitlab--get-headline-props))))
     (org-entry-put headline-pos org-gitlab-property-pid pid)
     (org-entry-put headline-pos org-gitlab-property-iid iid)
     (message "Issue has bound successfully")))
 
 (defun org-gitlab-get-url ()
   "get issue url"
-  (let ((headline-pos) (headline (org-gitlab--get-headline)) (pid) (iid))
-    (when headline
-      (setq headline-pos (org-element-property :begin headline))
-      (setq pid
-	    (org-entry-get headline-pos org-gitlab-property-pid))
-      (setq iid
-	    (org-entry-get headline-pos org-gitlab-property-iid))
+  (let ((headline-pos) (headline-props (org-gitlab--get-headline-props)) (pid) (iid))
+    (when headline-props
+      (setq headline-pos (plist-get headline-props :begin))
+      (setq pid (org-entry-get headline-pos org-gitlab-property-pid))
+      (setq iid (org-entry-get headline-pos org-gitlab-property-iid))
       (if (and pid iid)
 	  (concat org-gitlab-base-url "/projects/" pid "/issues/" iid)))))
 
