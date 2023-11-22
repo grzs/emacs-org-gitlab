@@ -1,3 +1,21 @@
+;;; org-gitlab.el --- Org mode - GitLab synchronisation
+
+;; Copyright (C) 2023 Janos Gerzson
+
+;; Author: Janos Gerzson <gerzsonj@gmail.com>
+;; Version: 0.2
+;; Keywords: orgmode
+;; URL: https://github.com/grzs/emacs-org-gitlab
+
+;;; Commentary:
+
+;; This package provides functions to synchronize an org-mode task
+;; with a GitLab issue. Currently supported properties:
+;; title, description, time_estimate, time_spent
+
+(defgroup org-gitlab nil "Org GitLab sync")
+(defvar org-gitlab-base-url nil "Gitlab server URL")
+
 (defconst org-gitlab-property-pid "GITLAB_PROJECT_ID"
   "Gitlab project ID")
 
@@ -309,3 +327,5 @@
 		    (lambda (&key data &allow-other-keys)
 		      (message (format "Estimated time: %s" (alist-get 'human_time_estimate data))))))
       (message "Effort estimate is not set"))))
+
+(provide 'org-gitlab)
