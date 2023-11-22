@@ -167,6 +167,7 @@
 		    (org-gitlab-set-title (alist-get 'title data))
 		    (org-gitlab-set-description (alist-get 'description data))
 		    (org-gitlab-set-web-url (alist-get 'web_url data))
+		    (org-gitlab--set-effort (/ (alist-get 'time_estimate (alist-get 'time_stats data)) 60))
 		    (message "Pulled successfully")))))))
 
 (defun org-gitlab-push ()
@@ -230,18 +231,18 @@
   "Push log data to remote"
   (let ((org-gitlab-url (org-gitlab-get-url))
 	(data))
-	(add-to-list 'data (cons "summary" summary))
-	(add-to-list 'data (cons "duration" (org-gitlab--parse-duration duration)))
-	(message (format "Logging time: %s - %s" summary duration))
-	(request (concat org-gitlab-url "/add_spent_time")
-	  :type "POST"
-	  :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
-			 '("Content-Type" . "application/json"))
-	  :data (json-encode data)
-	  :parser 'json-read
-	  :success (cl-function
-		    (lambda (&key data &allow-other-keys)
-		      (message (format "Total logged: %s" (alist-get 'human_total_time_spent data))))))))
+    (add-to-list 'data (cons "summary" summary))
+    (add-to-list 'data (cons "duration" (org-gitlab--parse-duration duration)))
+    (message (format "Logging time: %s - %s" summary duration))
+    (request (concat org-gitlab-url "/add_spent_time")
+      :type "POST"
+      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+		     '("Content-Type" . "application/json"))
+      :data (json-encode data)
+      :parser 'json-read
+      :success (cl-function
+		(lambda (&key data &allow-other-keys)
+		  (message (format "Total logged: %s" (alist-get 'human_total_time_spent data))))))))
 
 (defun org-gitlab--parse-duration (duration)
   (let ((hour-minute (split-string duration ":")))
@@ -275,3 +276,36 @@
 	     (plist-get clock-heading-props :raw-value)
 	     (plist-get clock-props :duration))
 	  (message "Clock is still running")))))
+
+(defun org-gitlab--get-effort ()
+  "get effort estimate in minutes"
+  (let ((headline-props (org-gitlab--get-headline-props))
+	(effort-string))
+    (setq effort-string (org-entry-get (plist-get headline-props :begin) org-effort-property))
+    (if effort-string
+	(org-duration-string-to-minutes effort-string))))
+
+(defun org-gitlab--set-effort (minutes)
+  "set effort estimate MINUTES"
+  (if (numberp minutes) minutes
+    (error "MINUTES has to be a number"))
+  (save-excursion
+    (goto-char (plist-get (org-gitlab--get-headline-props) :begin))
+    (org-set-effort nil (org-duration-from-minutes minutes))))
+
+(defun org-gitlab-estimate-push ()
+  "Push estimate"
+  (interactive)
+  (let ((org-gitlab-url (org-gitlab-get-url))
+	(duration (org-gitlab--get-effort)))
+    (if duration
+	(request (concat org-gitlab-url "/time_estimate")
+	  :type "POST"
+	  :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+			 '("Content-Type" . "application/json"))
+	  :data (json-encode (list (cons "duration" (format "%dm" duration))))
+	  :parser 'json-read
+	  :success (cl-function
+		    (lambda (&key data &allow-other-keys)
+		      (message (format "Estimated time: %s" (alist-get 'human_time_estimate data))))))
+      (message "Effort estimate is not set"))))
