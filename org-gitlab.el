@@ -104,20 +104,6 @@
     (org-entry-put headline-pos org-gitlab-property-iid iid)
     (message "Issue has bound successfully")))
 
-(defun org-gitlab--parse-duration (duration)
-  (let ((hour-minute (split-string duration ":")))
-    (format "%sh %sm" (car hour-minute) (cadr hour-minute))))
-
-(defun org-gitlab--find-last-clocked ()
-  (let ((heading) (clock) (clock-marker (car org-clock-history)))
-    (switch-to-buffer (marker-buffer clock-marker))
-    (setq heading (org-element-at-point clock-marker))
-    (goto-char clock-marker)
-    (when (re-search-forward "^CLOCK: .* =>  " nil t)
-      (setq clock (org-element-at-point (point-at-bol)))
-      (cons (org-element-property :raw-value heading)
-	    (org-element-property :duration clock)))))
-
 (defun org-gitlab-get-url ()
   "get issue url"
   (let ((headline-pos) (headline (org-gitlab--get-headline)) (pid) (iid))
@@ -136,8 +122,6 @@
   (org-entry-put 0 "GITLAB_PROJECT_REPO_URL" (alist-get 'ssh_url_to_repo data))
   (org-entry-put 0 "GITLAB_PROJECT_WEB_URL" (alist-get 'web_url data))
   (message "Project info updated"))
-
-;; Requests
 
 (defun org-gitlab-project-search (name)
   "Search project by name, update if found only one"
@@ -244,6 +228,7 @@
 			    (message "Not found any issue")
 			  (message "More then one issue found"))))))))))
 
+;; logging time
 (defun org-gitlab--push-clocked(summary duration)
   "Push log data to remote"
   (let ((org-gitlab-url (org-gitlab-get-url))
@@ -261,13 +246,24 @@
 		    (lambda (&key data &allow-other-keys)
 		      (message (format "Total logged: %s" (alist-get 'human_total_time_spent data))))))))
 
+(defun org-gitlab--parse-duration (duration)
+  (let ((hour-minute (split-string duration ":")))
+    (format "%sh %sm" (car hour-minute) (cadr hour-minute))))
+
 (defun org-gitlab-log-last-clocked ()
   "Log last clocked duration as spent time on remote"
   (interactive)
-  (save-excursion
-    (let ((clocked (org-gitlab--find-last-clocked)))
-      (if clocked (org-gitlab--push-clocked
-		   (car clocked) (cdr clocked))))))
+  (let ((clock-marker (car org-clock-history))
+	(clock-heading-props) (clock-props))
+    (with-current-buffer (marker-buffer clock-marker)
+      (goto-char clock-marker)
+      (setq clock-heading-props (cadr (org-element-headline-parser (point-at-eol))))
+      (when (re-search-forward "^CLOCK: .* =>  " nil t)
+	(beginning-of-line)
+	(setq clock-props (cadr (org-element-clock-parser (point-at-eol))))
+	(org-gitlab--push-clocked
+	 (plist-get clock-heading-props :raw-value)
+	 (plist-get clock-props :duration))))))
 
 (defun org-gitlab-log-at-point ()
   "Push duration at point"
