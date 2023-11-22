@@ -61,6 +61,7 @@
   "get gitlab description source block element"
   (let ((headline-props (org-gitlab--get-headline-props)))
     (when headline-props
+      (goto-char (plist-get headline-props :begin))
       (when (re-search-forward org-gitlab-description-re
 			       (save-excursion (org-next-visible-heading 1) (point))
 			       t)
