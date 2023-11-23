@@ -1,6 +1,17 @@
+;;; org-gitlab-hydra.el --- Hydra for Org mode - GitLab synchronisation
+
+;; Copyright (C) 2023 Janos Gerzson
+
+;; Author: Janos Gerzson <gerzsonj@gmail.com>
+;; Version: 1.0
+;; Package-Requires: ((org-gitlab "0.3") (hydra "20220910.1206"))
+;; Keywords: orgmode
+;; URL: https://github.com/grzs/emacs-org-gitlab
+
+(require 'org-gitlab)
 (require 'hydra)
 
-(defhydra hydra-org-gitlab (:volor pink :hint nil)
+(defhydra hydra-org-gitlab (:color pink :hint nil)
   "
 ^Project^      ^Issue^              ^Description^         ^Time^
 ^^^^^^^^---------------------------------------------------------------------------
@@ -24,3 +35,5 @@ _U_: update    _B_: bind by title   _x_: finish editing   _L_: log last clocked
   ("c" nil "cancel"))
 
 (define-key global-map (kbd "C-c g") 'hydra-org-gitlab/body)
+
+(provide 'org-gitlab-hydra)

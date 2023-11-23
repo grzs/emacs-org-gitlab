@@ -3,7 +3,7 @@
 ;; Copyright (C) 2023 Janos Gerzson
 
 ;; Author: Janos Gerzson <gerzsonj@gmail.com>
-;; Version: 0.2
+;; Version: 0.3
 ;; Keywords: orgmode
 ;; URL: https://github.com/grzs/emacs-org-gitlab
 
@@ -334,6 +334,8 @@
 	(src-block (org-gitlab--get-description-src-block)))
     (if (not src-block) (message "Couldn't find description source block"))
     (when src-block
+      (org-show-entry)
+      (if (org-check-for-hidden 'items) (org-show-block-all))
       (next-line)
       (setq src-block-start (point))
       (save-excursion
