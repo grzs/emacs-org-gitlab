@@ -326,4 +326,25 @@
 		      (message (format "Estimated time: %s" (alist-get 'human_time_estimate data))))))
       (message "Effort estimate is not set"))))
 
+;; edit mode on off
+(defun org-gitlab-edit-description ()
+  "Narrowing window to description and switch to markdown mode"
+  (interactive)
+  (let ((src-block-start) (src-block-end)
+	(src-block (org-gitlab--get-description-src-block)))
+    (if (not src-block) (message "Couldn't find description source block"))
+    (when src-block
+      (next-line)
+      (setq src-block-start (point))
+      (save-excursion
+	(goto-char (org-element-property :end src-block)) (previous-line)
+	(setq src-block-end (point)))
+      (narrow-to-region src-block-start src-block-end)
+      (markdown-mode))))
+
+(defun org-gitlab-widen ()
+  "Get back to normal mode"
+  (interactive)
+  (widen) (org-mode))
+
 (provide 'org-gitlab)
