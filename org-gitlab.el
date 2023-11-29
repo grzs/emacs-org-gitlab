@@ -336,10 +336,10 @@
     (when src-block
       (org-show-entry)
       (if (org-check-for-hidden 'items) (org-show-block-all))
-      (next-line)
+      (next-line) (beginning-of-line)
       (setq src-block-start (point))
       (save-excursion
-	(goto-char (org-element-property :end src-block)) (previous-line)
+	(goto-char (org-element-property :end src-block)) (previous-line) (beginning-of-line)
 	(setq src-block-end (point)))
       (narrow-to-region src-block-start src-block-end)
       (markdown-mode))))
