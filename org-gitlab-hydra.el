@@ -16,7 +16,7 @@
 ^Project^      ^Issue^              ^Description^         ^Time^
 ^^^^^^^^---------------------------------------------------------------------------
 _P_: search    _b_: bind by ID      _d_: start editing    _l_: log clock at point
-_U_: update    _B_: bind by title   _x_: finish editing   _L_: log last clocked
+_U_: update    _B_: bind by title   ^ ^                   _L_: log last clocked
 ^ ^            _f_: pull            ^ ^                   _e_: push effort estimate
 ^ ^            _p_: push
 
@@ -28,7 +28,6 @@ _U_: update    _B_: bind by title   _x_: finish editing   _L_: log last clocked
   ("f" org-gitlab-pull)
   ("p" org-gitlab-push)
   ("d" org-gitlab-edit-description)
-  ("x" org-gitlab-widen)
   ("l" org-gitlab-log-at-point)
   ("L" org-gitlab-log-last-clocked)
   ("e" org-gitlab-estimate-push)
