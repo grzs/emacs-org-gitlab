@@ -285,23 +285,6 @@
 
 ;;; Logging time
 
-(defun org-gitlab--push-clocked(summary duration)
-  "Push log data to remote"
-  (let ((org-gitlab-url (org-gitlab--get-api-url))
-	(data))
-    (add-to-list 'data (cons "summary" summary))
-    (add-to-list 'data (cons "duration" (org-gitlab--parse-duration duration)))
-    (message (format "/spent %s hour(s) on: %s" duration summary))
-    (request (concat org-gitlab-url "/add_spent_time")
-      :type "POST"
-      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
-		     '("Content-Type" . "application/json"))
-      :data (json-encode data)
-      :parser 'json-read
-      :success (cl-function
-		(lambda (&key data &allow-other-keys)
-		  (message (format "Total logged: %s" (alist-get 'human_total_time_spent data))))))))
-
 (defun org-gitlab-log-at-point ()
   "Push duration at point, with closest heading as summary"
   (interactive)
