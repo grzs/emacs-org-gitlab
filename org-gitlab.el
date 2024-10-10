@@ -32,6 +32,9 @@
 (defconst org-gitlab-description-block-begin "#+BEGIN_SRC markdown")
 (defconst org-gitlab-description-block-end "#+END_SRC")
 
+(defvar org-gitlab-bind-and-update t
+  "when non NIL, update issue after successful bind")
+
 ;;; helper functions
 
 (defun org-gitlab--below-issue-p ()
@@ -42,10 +45,14 @@
   (car (last (org-heading-components) 2)))
 
 (defun org-gitlab--get-title ()
-  "get main headline"
+  "get issue headline"
   (when (org-gitlab--below-issue-p)
     (let ((headline (car (last (org-element-lineage (org-element-at-point)) 2))))
-      (when (eq (org-element-type headline) 'headline) headline))))
+      (if (eq (org-element-type headline) 'headline) headline
+        (let ((headline (org-element-at-point)))
+          ;; last empty line after last headline
+          (if (and (eq (org-element-type headline) 'headline) (eq (org-outline-level) 1)) headline
+            (error "Couldn't find title")))))))
 
 (defun org-gitlab--get-title-begin ()
   "get current headline begin position"
@@ -74,33 +81,44 @@
 
 (defun org-gitlab-get-project-id ()
   "get main property project ID"
-  (cdr (car (org-entry-properties 0 org-gitlab-property-pid))))
+  (if-let ((pid (cdr (car (org-entry-properties 0 org-gitlab-property-pid)))))
+      pid
+    (org-gitlab-set-project-id)))
 
-(defun org-gitlab-set-project-id (pid)
+(defun org-gitlab-set-project-id (&optional pid)
   "set main property project ID"
-  (when pid
-    (if (numberp pid) (setq pid (number-to-string pid)))
-    (save-excursion
-      (goto-char 0)
-      (when (org-at-heading-p)
-	(insert "\n") (goto-char 0))
-      (org-entry-put 0 org-gitlab-property-pid pid))))
+  (unless pid (setq pid (read-string "pid: ")))
+  (if (numberp pid) (setq pid (number-to-string pid)))
+  (save-excursion
+    (goto-char 0)
+    (when (org-at-heading-p)
+      (insert "\n") (goto-char 0))
+    (org-entry-put 0 org-gitlab-property-pid pid))
+  pid)
 
-(defun org-gitlab-update-project-info (data)
+;; callback helper
+
+(defun org-gitlab--update-project-info (data)
   (org-gitlab-set-project-id (alist-get 'id data))
   (org-entry-put 0 "GITLAB_PROJECT_NAME" (alist-get 'name data))
   (org-entry-put 0 "GITLAB_PROJECT_REPO_URL" (alist-get 'ssh_url_to_repo data))
-  (org-entry-put 0 "GITLAB_PROJECT_WEB_URL" (alist-get 'web_url data))
-  (message "Project info updated"))
+  (org-entry-put 0 "GITLAB_PROJECT_WEB_URL" (alist-get 'web_url data)))
 
 ;;; issue params
 
-(defun org-gitlab-set-ids (pid iid)
-  "Set ids as properties: PID, IID"
+(defun org-gitlab-get-iid ()
+  "get issue ID"
+  (let ((title-begin (org-gitlab--get-title-begin)))
+    (when title-begin
+      (if-let ((iid (org-entry-get title-begin org-gitlab-property-iid))) iid
+        (org-gitlab-set-iid)))))
+
+(defun org-gitlab-set-iid (&optional iid)
+  "set issue ID"
   (when-let ((title-begin (org-gitlab--get-title-begin)))
-    (org-entry-put title-begin org-gitlab-property-pid pid)
-    (org-entry-put title-begin org-gitlab-property-iid iid)
-    (message (format "Issue has bound successfully (pid: %s, iid: %s" pid iid))))
+    (unless iid (setq iid (read-string "iid: ")))
+    (org-entry-put title-begin org-gitlab-property-iid iid))
+  iid)
 
 (defun org-gitlab-get-title ()
   "get issue title"
@@ -112,13 +130,15 @@
   "set issue title"
   (save-excursion
     (when (org-gitlab--goto-title)
-      (org-edit-headline title))))
+      (org-edit-headline title)))
+  title)
 
 (defun org-gitlab-set-web-url (url)
   "Set web URL as a property"
   (save-excursion
     (when (org-gitlab--goto-title)
-      (org-entry-put (org-element-at-point) org-gitlab-property-web-url url))))
+      (org-entry-put (org-element-at-point) org-gitlab-property-web-url url)))
+  url)
 
 ;; effort estimate
 
@@ -133,8 +153,10 @@
   (if (numberp minutes) minutes
     (error "MINUTES has to be a number"))
   (save-excursion
-    (org-gitlab--goto-title)
-    (org-set-effort nil (org-duration-from-minutes minutes))))
+    (let ((duration (org-duration-from-minutes minutes)))
+      (org-gitlab--goto-title)
+      (org-set-effort nil duration)
+      duration)))
 
 ;; description block
 
@@ -150,7 +172,8 @@
     (save-excursion
       (if (org-gitlab--goto-description-block)
           (or (previous-line)
-              (delete-region (point) (org-element-property :end (org-element-at-point))))
+              (delete-region
+               (point) (org-element-property :end (org-element-at-point))))
         (org-end-of-meta-data))
       (insert (string-join
                (list
@@ -166,28 +189,44 @@
   (interactive)
   (when (org-gitlab--goto-description-block) (org-edit-src-code)))
 
+;; callback helpers
+
+(defun org-gitlab--set-ids (pid iid)
+  "Set ids as properties: PID, IID"
+  (when-let ((title-begin (org-gitlab--get-title-begin)))
+    (org-entry-put title-begin org-gitlab-property-pid pid)
+    (org-entry-put title-begin org-gitlab-property-iid iid)))
+
+(defun org-gitlab--update-issue (data)
+  (org-gitlab-set-title (alist-get 'title data))
+  (org-gitlab-set-description (alist-get 'description data))
+  (org-gitlab-set-web-url (alist-get 'web_url data))
+  (org-gitlab-set-effort
+   (/ (alist-get 'time_estimate (alist-get 'time_stats data)) 60)))
+
 ;;; queries
 
 (defun org-gitlab--get-api-url ()
   "get issue API url"
   (let ((title-begin (org-gitlab--get-title-begin)))
     (when title-begin
-      (let ((pid (org-entry-get title-begin org-gitlab-property-pid))
-            (iid (org-entry-get title-begin org-gitlab-property-iid)))
+      (let ((pid (org-gitlab-get-project-id))
+            (iid (org-gitlab-get-iid)))
         (when (and pid iid)
-	  (concat org-gitlab-base-url "/projects/" pid "/issues/" iid))))))
+	  (format "%s/projects/%s/issues/%s"
+                  org-gitlab-base-url pid iid))))))
 
 (defun org-gitlab-project-search (name)
   "Search project by name, update if found only one"
   (interactive "sname: ")
-  (request (concat org-gitlab-base-url
-		   "/projects?&search=" (url-encode-url name) "&in=name")
+  (request (format "/projects?&search=%s&in=name"
+                   org-gitlab-base-url (url-encode-url name))
     :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
     :parser 'json-read
     :success (cl-function
 	      (lambda (&key data &allow-other-keys)
 		(if (length= data 1)
-		    (org-gitlab-update-project-info (elt data 0))
+		    (org-gitlab--update-project-info (elt data 0))
 		  (if (length= data 0)
 		      (message "Not found any project")
 		    (message "More then one project found")))))))
@@ -196,92 +235,80 @@
   "Update project info as file properties"
   (interactive)
   (let ((pid (org-gitlab-get-project-id)))
-    (unless pid
-      (setq pid (read-string "pid: "))
-      (org-gitlab-set-project-id pid))
-    (save-excursion
-      (goto-char 0)
-      (when (org-at-heading-p)
-	(insert "\n") (goto-char 0))
-      (org-entry-put 0 org-gitlab-property-pid pid))
-    (request (concat org-gitlab-base-url "/projects/" pid)
+    (request (format "%s/projects/%s" org-gitlab-base-url pid)
       :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
       :parser 'json-read
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
-		  (org-gitlab-update-project-info data))))))
+		  (org-gitlab--update-project-info data))))))
 
 (defun org-gitlab-pull ()
   "Get description and title from remote"
   (interactive)
-  (let ((org-gitlab-url (org-gitlab--get-api-url)))
-    (when org-gitlab-url
-      (request org-gitlab-url
-	:headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
-	:parser 'json-read
-	:success (cl-function
-		  (lambda (&key data &allow-other-keys)
-		    (org-gitlab-set-title (alist-get 'title data))
-		    (org-gitlab-set-description (alist-get 'description data))
-		    (org-gitlab-set-web-url (alist-get 'web_url data))
-		    (org-gitlab-set-effort (/ (alist-get 'time_estimate (alist-get 'time_stats data)) 60))
-		    (message "Pulled successfully")))))))
-
-(defun org-gitlab-push ()
-  "Push dscription and title to remote"
-  (interactive)
-  (let ((org-gitlab-url (org-gitlab--get-api-url))
-	(title (org-gitlab-get-title))
-	(description (org-gitlab-get-description))
-	(data))
-    (when org-gitlab-url
-      (if title (add-to-list 'data (cons "title" title)))
-      (if description (add-to-list 'data (cons "description" description)))
-      (request org-gitlab-url
-	:type "PUT"
-	:headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
-		       '("Content-Type" . "application/json"))
-	:data (json-encode data)
-	:parser 'json-read
-	:success (cl-function
-		  (lambda (&key data &allow-other-keys)
-		    (message "Pushed successfully")))))))
-
-(defun org-gitlab-bind (iid)
-  "Search by PID and IID"
-  (interactive "niid: ")
-  (let ((pid (org-gitlab-get-project-id)))
-    (unless pid
-      (setq pid (read-string "pid: "))
-      (org-gitlab-set-project-id pid))
-    (request (concat org-gitlab-base-url (format "/projects/%s/issues/%d" pid iid))
+  (when-let ((url (org-gitlab--get-api-url)))
+    (request url
       :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
       :parser 'json-read
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
-		  (org-gitlab-set-ids
-		   (number-to-string (alist-get 'project_id data))
-		   (number-to-string (alist-get 'iid data))))))))
+                  org-gitlab--update-issue)))))
+
+(defun org-gitlab-bind ()
+  "Search by PID and IID, if PULL is not nil, pull details as well"
+  (interactive)
+  (when-let ((url (org-gitlab--get-api-url)))
+    (request url
+      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+      :parser 'json-read
+      :success (cl-function
+                (lambda (&key data &allow-other-keys)
+                  (let* ((pid (number-to-string (alist-get 'project_id data)))
+                         (iid (number-to-string (alist-get 'iid data)))
+                         (msg (format "Issue has bound successfully (pid: %s, iid: %s)" pid iid)))
+                    (org-gitlab--set-ids pid iid)
+                    (if org-gitlab-bind-and-update (org-gitlab--update-issue data)
+                      (setq msg (concat msp " - no pull requested")))
+                    (message msg)))))))
 
 (defun org-gitlab-bind-by-title ()
   "Search by title and set ids if found only one"
   (interactive)
-  (save-excursion
-    (let ((title (org-gitlab-get-title)))
-      (when title
-	(request (concat org-gitlab-base-url
-			 "/issues?scope=assigned_to_me&search=" (url-encode-url title) "&in=title")
-	  :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
-	  :parser 'json-read
-	  :success (cl-function
-		    (lambda (&key data &allow-other-keys)
-		      (if (length= data 1)
-			  (org-gitlab-set-ids
-			   (number-to-string (alist-get 'project_id (elt data 0)))
-			   (number-to-string (alist-get 'iid (elt data 0))))
-			(if (length= data 0)
-			    (message "Not found any issue")
-			  (message "More then one issue found"))))))))))
+  (when-let* ((title (org-gitlab-get-title))
+              (url (format "%s/issues?scope=assigned_to_me&search=%s&in=title"
+                           org-gitlab-base-url (url-encode-url title))))
+    (request url
+      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+      :parser 'json-read
+      :success (cl-function
+		(lambda (&key data &allow-other-keys)
+		  (if (length= data 1)
+		      (org-gitlab-set-ids
+		       (number-to-string (alist-get 'project_id (elt data 0)))
+		       (number-to-string (alist-get 'iid (elt data 0))))
+                    (if org-gitlab-bind-and-update
+                        (org-gitlab--update-issue data)
+                      (message "No pull requested"))
+		    (if (length= data 0)
+			(message "Not found any issue")
+		      (message "More then one issue found"))))))))
+
+(defun org-gitlab-push ()
+  "Push dscription and title to remote"
+  (interactive)
+  (when-let* ((url (org-gitlab--get-api-url))
+	      (title (org-gitlab-get-title))
+	      (description (org-gitlab-get-description))
+	      (data (list (cons "title" title)
+                          (cons "description" description))))
+    (request url
+      :type "PUT"
+      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+		     '("Content-Type" . "application/json"))
+      :data (json-encode-alist data)
+      :parser 'json-read
+      :success (cl-function
+		(lambda (&key data &allow-other-keys)
+		  (message "Pushed successfully"))))))
 
 ;;; Logging time
 
@@ -304,7 +331,8 @@
               :parser 'json-read
               :success (cl-function
 	                (lambda (&key data &allow-other-keys)
-	                  (message (format "Total logged: %s" (alist-get 'human_total_time_spent data)))))))
+	                  (message (format "Total logged: %s"
+                                           (alist-get 'human_total_time_spent data)))))))
 	(message "It seems that clock is still running"))
     (message "Not at a clock line")))
 
@@ -336,7 +364,8 @@
 	  :parser 'json-read
 	  :success (cl-function
 		    (lambda (&key data &allow-other-keys)
-		      (message (format "Estimated time: %s" (alist-get 'human_time_estimate data))))))
+		      (message (format "Estimated time: %s"
+                                       (alist-get 'human_time_estimate data))))))
       (message "Effort estimate is not set"))))
 
 (provide 'org-gitlab)
