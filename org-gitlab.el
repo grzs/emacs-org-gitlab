@@ -251,7 +251,7 @@
       :parser 'json-read
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
-                  org-gitlab--update-issue)))))
+                  (org-gitlab--update-issue data))))))
 
 (defun org-gitlab-bind ()
   "Search by PID and IID, if PULL is not nil, pull details as well"
