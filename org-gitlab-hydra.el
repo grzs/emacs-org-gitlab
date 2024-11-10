@@ -17,7 +17,7 @@
 ^^^^^^^^--------------------------------------------------------------------------------
 _P_: search         _b_: bind by ID      _d_: start editing    _l_: log clock at point
 _U_: update meta    _B_: bind by title   ^ ^                   _L_: log last clocked
-^I^  update issues  _f_: pull            ^ ^                   _e_: push effort estimate
+_I_: update issues  _f_: pull            ^ ^                   _e_: push effort estimate
 ^ ^                 _p_: push
 
 "
