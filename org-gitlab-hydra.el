@@ -13,16 +13,17 @@
 
 (defhydra hydra-org-gitlab (:color pink :hint nil)
   "
-^Project^      ^Issue^              ^Description^         ^Time^
-^^^^^^^^---------------------------------------------------------------------------
-_P_: search    _b_: bind by ID      _d_: start editing    _l_: log clock at point
-_U_: update    _B_: bind by title   ^ ^                   _L_: log last clocked
-^ ^            _f_: pull            ^ ^                   _e_: push effort estimate
-^ ^            _p_: push
+^Project^           ^Issue^              ^Description^         ^Time^
+^^^^^^^^--------------------------------------------------------------------------------
+_P_: search         _b_: bind by ID      _d_: start editing    _l_: log clock at point
+_U_: update meta    _B_: bind by title   ^ ^                   _L_: log last clocked
+^I^  update issues  _f_: pull            ^ ^                   _e_: push effort estimate
+^ ^                 _p_: push
 
 "
   ("P" org-gitlab-project-search)
   ("U" org-gitlab-project-info-update)
+  ("I" org-gitlab-update-all)
   ("b" org-gitlab-bind)
   ("B" org-gitlab-bind-by-title)
   ("f" org-gitlab-pull)
