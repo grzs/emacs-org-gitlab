@@ -19,6 +19,9 @@
   (alist-get 'org-sync-gitlab-auth-token safe-local-variable-values)
   "Get gitlab token from safe-local-variable-values")
 
+(defconst org-gitlab-keyword-todo "#+TODO: TODO IN_PROGRESS | TO_REVIEW DONE"
+  "Gitlab issue states")
+
 (defconst org-gitlab-property-pid "GITLAB_PROJECT_ID"
   "Gitlab project ID")
 
@@ -89,11 +92,24 @@
   (unless (string-equal title (org-get-title))
     (save-excursion
       (beginning-of-buffer) (or (org-goto-first-child) (end-of-buffer))
-      (ignore-errors (search-backward-regexp "^#\\+TITLE:"))
-      (when (org-at-keyword-p)
-        (while (not (or (org-at-heading-p) (eq (point) (buffer-end 1)))) (delete-line)))
-      (insert (format "#+TITLE: %s" title)) (newline)
+      (search-backward-regexp "^#\\+TITLE:" nil t)
+      (when (and (org-at-keyword-p)
+                 (string-equal "TITLE" (org-element-property :key (org-element-at-point))))
+        (delete-line)
+        (while (progn
+                 (unless (org-at-keyword-p) (delete-line))
+                 (or (org-at-heading-p) (eq (point) (buffer-end 1))))))
+      (insert (format "#+TITLE: %s" title))
       (newline))))
+
+(defun org-gitlab--set-todo-keywords ()
+  (save-excursion)
+  (beginning-of-buffer)
+  (when (search-forward-regexp "#\\+TITLE:" nil t)
+    (if (search-forward-regexp "#\\+TODO:" nil t) (delete-line)
+      (next-line))
+    (insert org-gitlab-keyword-todo)
+    (newline)))
 
 (defun org-gitlab-get-project-id ()
   "get main property project ID"
@@ -119,7 +135,8 @@
   (org-entry-put 0 "GITLAB_PROJECT_NAME" (alist-get 'name data))
   (org-entry-put 0 "GITLAB_PROJECT_REPO_URL" (alist-get 'ssh_url_to_repo data))
   (org-entry-put 0 "GITLAB_PROJECT_WEB_URL" (alist-get 'web_url data))
-  (org-gitlab-set-project-title (alist-get 'name data)))
+  (org-gitlab-set-project-title (alist-get 'name data))
+  (org-gitlab--set-todo-keywords))
 
 ;;; issue params
 
