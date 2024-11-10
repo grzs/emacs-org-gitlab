@@ -14,6 +14,7 @@
 ;; title, description, time_estimate, time_spent
 
 (defvar org-gitlab-base-url nil "Gitlab server URL")
+(defvar org-gitlab-username nil "Gitlab user name")
 (defconst org-gitlab-token
   (alist-get 'org-sync-gitlab-auth-token safe-local-variable-values)
   "Get gitlab token from safe-local-variable-values")
@@ -23,6 +24,9 @@
 
 (defconst org-gitlab-property-iid "GITLAB_ISSUE_ID"
   "Gitlab issue ID")
+
+(defconst org-gitlab-property-assignee "GITLAB_ASSIGNEE"
+  "Gitlab issue assignee")
 
 (defconst org-gitlab-property-web-url "GITLAB_WEB_URL"
   "Gitlab issue URL")
@@ -79,6 +83,18 @@
 
 ;;; project params
 
+(defun org-gitlab-set-project-title (&optional title)
+  (interactive)
+  (unless title (setq title (read-string "title: ")))
+  (unless (string-equal title (org-get-title))
+    (save-excursion
+      (beginning-of-buffer) (or (org-goto-first-child) (end-of-buffer))
+      (ignore-errors (search-backward-regexp "^#\\+TITLE:"))
+      (when (org-at-keyword-p)
+        (while (not (or (org-at-heading-p) (eq (point) (buffer-end 1)))) (delete-line)))
+      (insert (format "#+TITLE: %s" title)) (newline)
+      (newline))))
+
 (defun org-gitlab-get-project-id ()
   "get main property project ID"
   (if-let ((pid (cdr (car (org-entry-properties 0 org-gitlab-property-pid)))))
@@ -92,7 +108,7 @@
   (save-excursion
     (goto-char 0)
     (when (org-at-heading-p)
-      (insert "\n") (goto-char 0))
+      (newline) (goto-char 0))
     (org-entry-put 0 org-gitlab-property-pid pid))
   pid)
 
@@ -102,7 +118,8 @@
   (org-gitlab-set-project-id (alist-get 'id data))
   (org-entry-put 0 "GITLAB_PROJECT_NAME" (alist-get 'name data))
   (org-entry-put 0 "GITLAB_PROJECT_REPO_URL" (alist-get 'ssh_url_to_repo data))
-  (org-entry-put 0 "GITLAB_PROJECT_WEB_URL" (alist-get 'web_url data)))
+  (org-entry-put 0 "GITLAB_PROJECT_WEB_URL" (alist-get 'web_url data))
+  (org-gitlab-set-project-title (alist-get 'name data)))
 
 ;;; issue params
 
@@ -140,6 +157,14 @@
       (org-entry-put (org-element-at-point) org-gitlab-property-web-url url)))
   url)
 
+(defun org-gitlab-set-assignee (assignee)
+  "Set assignee a property"
+  (let ((assignee (if (stringp assignee) assignee org-gitlab-username)))
+    (save-excursion
+      (when (org-gitlab--goto-title)
+        (org-entry-put (org-element-at-point) org-gitlab-property-assignee assignee)))
+    assignee))
+
 ;; effort estimate
 
 (defun org-gitlab-get-effort ()
@@ -175,22 +200,47 @@
               (delete-region
                (point) (org-element-property :end (org-element-at-point))))
         (org-end-of-meta-data))
-      (insert (string-join
-               (list
-                org-gitlab-description-block-header
-                org-gitlab-description-block-begin
-                description
-                org-gitlab-description-block-end
-                "")
-               "\n")))))
+      (insert org-gitlab-description-block-header) (newline)
+      (insert org-gitlab-description-block-begin) (newline)
+      (insert description) (newline)
+      (insert org-gitlab-description-block-end) (newline))))
 
 (defun org-gitlab-edit-description ()
   "Narrowing window to description and switch to markdown mode"
   (interactive)
   (when (org-gitlab--goto-description-block) (org-edit-src-code)))
 
-;; callback helpers
+;; url helper
+(defun org-gitlab--compose-url (&optional path query-params-alist)
+  (let* ((url-struct (url-generic-parse-url org-gitlab-base-url))
+         (path-and-query (url-path-and-query url-struct))
+         (path-list (string-split (car path-and-query) "/"))
+         (path (string-join
+                (if (stringp path)
+                    (append path-list (string-split path "/" t))
+                  path-list)
+                "/"))
+         (query-string (cdr path-and-query))
+         (query-params-alist-combined
+          (if (eq 0 (length query-string)) query-params-alist
+            (append (url-parse-query-string query-string) query-params-alist))))
+    (when query-params-alist-combined
+      (setq query-string (url-build-query-string query-params-alist-combined)))
+    (setf (url-filename url-struct)
+          (if (eq 0 (length query-string)) path
+            (string-join (list path query-string) "?")))
+    (url-recreate-url url-struct)))
 
+(defun org-gitlab--get-issue-path (subresources)
+  "get issue API url"
+  (let ((title-begin (org-gitlab--get-title-begin)))
+    (when title-begin
+      (let ((pid (org-gitlab-get-project-id))
+            (iid (org-gitlab-get-iid)))
+        (when (and pid iid)
+	  (string-join (append (list "projects" pid "issues" iid) subresources) "/"))))))
+
+;; callback helpers
 (defun org-gitlab--set-ids (pid iid)
   "Set ids as properties: PID, IID"
   (when-let ((title-begin (org-gitlab--get-title-begin)))
@@ -199,28 +249,39 @@
 
 (defun org-gitlab--update-issue (data)
   (org-gitlab-set-title (alist-get 'title data))
+  (org-gitlab-set-assignee (alist-get 'username (alist-get 'assignee data)))
   (org-gitlab-set-description (alist-get 'description data))
   (org-gitlab-set-web-url (alist-get 'web_url data))
   (org-gitlab-set-effort
    (/ (alist-get 'time_estimate (alist-get 'time_stats data)) 60)))
 
+(defun org-gitlab--create-or-get-issue (iid data)
+  (when (eq 0 (string-to-number iid))
+    (error "issue id must be a string representing an integer")) 
+ (save-excursion
+    (if-let ((heading-pos (org-find-property org-gitlab-property-iid iid)))
+        (goto-char heading-pos)
+      (end-of-buffer) (end-of-line)
+      (unless (eq (point) (save-excursion (beginning-of-line) (point))) (newline))
+      (org-insert-heading)
+      (org-entry-put (point) org-gitlab-property-iid iid))
+    (when (alist-get 'title data)) (org-gitlab--update-issue data)))
+
+(defun org-gitlab--update-issues (data)
+  (let ((i 0))
+    (while (< i (length data))
+      (let* ((issue-data (aref data i))
+             (iid (number-to-string (alist-get 'id issue-data))))
+        (org-gitlab--create-or-get-issue iid issue-data)
+      (setq i (1+ i))))))
+
 ;;; queries
-
-(defun org-gitlab--get-api-url ()
-  "get issue API url"
-  (let ((title-begin (org-gitlab--get-title-begin)))
-    (when title-begin
-      (let ((pid (org-gitlab-get-project-id))
-            (iid (org-gitlab-get-iid)))
-        (when (and pid iid)
-	  (format "%s/projects/%s/issues/%s"
-                  org-gitlab-base-url pid iid))))))
-
 (defun org-gitlab-project-search (name)
   "Search project by name, update if found only one"
   (interactive "sname: ")
-  (request (format "/projects?&search=%s&in=name"
-                   org-gitlab-base-url (url-encode-url name))
+  (request (org-gitlab--compose-url
+            "/projects"
+            (list (cons "search" (url-encode-url name)) '("in" "name")))
     :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
     :parser 'json-read
     :success (cl-function
@@ -235,18 +296,34 @@
   "Update project info as file properties"
   (interactive)
   (let ((pid (org-gitlab-get-project-id)))
-    (request (format "%s/projects/%s" org-gitlab-base-url pid)
+    (request (org-gitlab--compose-url (string-join ("projects" pid) "/"))
       :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
       :parser 'json-read
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
 		  (org-gitlab--update-project-info data))))))
 
-(defun org-gitlab-pull ()
-  "Get description and title from remote"
+(defun org-gitlab-update-all ()
+  "Get issues assigned to user"
   (interactive)
-  (when-let ((url (org-gitlab--get-api-url)))
+  (unless org-gitlab-username
+    (error "org-gitlab-username is unset"))
+  (let* ((path (string-join (list "projects" (org-gitlab-get-project-id) "issues") "/"))
+         (query-params (list (list "assignee_username" org-gitlab-username)
+                             '("state" "opened")))
+         (url (org-gitlab--compose-url path query-params)))
     (request url
+     :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+     :parser 'json-read
+     :success (cl-function
+               (lambda (&key data &allow-other-keys)
+                 (org-gitlab--update-issues data))))))
+
+(defun org-gitlab-pull ()
+  "Update issue at point"
+  (interactive)
+  (when-let ((issue-path (org-gitlab--get-issue-path)))
+    (request (org-gitlab--compose-url issue-path)
       :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
       :parser 'json-read
       :success (cl-function
@@ -256,8 +333,8 @@
 (defun org-gitlab-bind ()
   "Search by PID and IID, if PULL is not nil, pull details as well"
   (interactive)
-  (when-let ((url (org-gitlab--get-api-url)))
-    (request url
+  (when-let ((issue-path (org-gitlab--get-issue-path)))
+    (request (org-gitlab--compose-url issue-path)
       :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
       :parser 'json-read
       :success (cl-function
@@ -295,12 +372,12 @@
 (defun org-gitlab-push ()
   "Push dscription and title to remote"
   (interactive)
-  (when-let* ((url (org-gitlab--get-api-url))
+  (when-let* ((issue-path (org-gitlab--get-issue-path))
 	      (title (org-gitlab-get-title))
 	      (description (org-gitlab-get-description))
 	      (data (list (cons "title" title)
                           (cons "description" description))))
-    (request url
+    (request (org-gitlab--compose-url issue-path)
       :type "PUT"
       :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
 		     '("Content-Type" . "application/json"))
@@ -318,12 +395,12 @@
   (if (org-at-clock-log-p)
       (if-let ((summary (org-gitlab--get-heading-title))
                (duration (org-element-property :duration (org-element-at-point))))
-          (let ((org-gitlab-url (org-gitlab--get-api-url))
+          (let ((path (org-gitlab--get-issue-path '("add_spent_time")))
 	        (data))
             (message (format "/spent %s hour(s) on: %s" duration summary))
             (add-to-list 'data (cons "summary" summary))
             (add-to-list 'data (cons "duration" (org-gitlab--parse-duration duration)))
-            (request (concat org-gitlab-url "/add_spent_time")
+            (request (org-gitlab--compose-url path)
               :type "POST"
               :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
 	                     '("Content-Type" . "application/json"))
@@ -353,10 +430,10 @@
 (defun org-gitlab-estimate-push ()
   "Push estimate"
   (interactive)
-  (let ((org-gitlab-url (org-gitlab--get-api-url))
+  (let ((path (org-gitlab--get-issue-path '("time_estimate")))
 	(duration (org-gitlab-get-effort)))
     (if duration
-	(request (concat org-gitlab-url "/time_estimate")
+	(request (org-gitlab--compose-url path)
 	  :type "POST"
 	  :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
 			 '("Content-Type" . "application/json"))
