@@ -1,1 +1,2 @@
+* TODO duplicated description at update
 * TODO deadline -> due date

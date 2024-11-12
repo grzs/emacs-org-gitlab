@@ -318,7 +318,7 @@
   (let ((i 0))
     (while (< i (length data))
       (let* ((issue-data (aref data i))
-             (iid (number-to-string (alist-get 'id issue-data))))
+             (iid (number-to-string (alist-get 'iid issue-data))))
         (org-gitlab--create-or-get-issue iid issue-data)
       (setq i (1+ i))))))
 
