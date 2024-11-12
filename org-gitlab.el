@@ -43,6 +43,7 @@
 ;;; dependencies
 (require 'org)
 (require 'org-element)
+(require 'org-clock)
 (require 'url)
 (require 'request)
 (require 'cl-extra)
@@ -403,12 +404,12 @@
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
 		  (if (length= data 1)
-		      (org-gitlab-set-ids
-		       (number-to-string (alist-get 'project_id (elt data 0)))
-		       (number-to-string (alist-get 'iid (elt data 0))))
-                    (if org-gitlab-bind-and-update
-                        (org-gitlab--update-issue data)
-                      (message "No pull requested"))
+                      (let (data0 (elt data 0))
+		        (org-gitlab--set-ids
+		         (number-to-string (alist-get 'project_id data))
+		         (number-to-string (alist-get 'iid data)))
+                        (when org-gitlab-bind-and-update
+                            (org-gitlab--update-issue data)))
 		    (if (length= data 0)
 			(message "Not found any issue")
 		      (message "More then one issue found"))))))))
