@@ -340,7 +340,7 @@
       :parser 'json-read
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
-		  (org-gitlab--update-project-info data))))))
+		  (org-gitlab--update-project-info data)))))))
 
 (defun org-gitlab-update-all ()
   "Get issues assigned to user"
@@ -352,7 +352,7 @@
     :parser 'json-read
     :success (cl-function
               (lambda (&key data &allow-other-keys)
-                (org-gitlab--update-issues data))))))
+                (org-gitlab--update-issues data)))))
 
 (defun org-gitlab-pull ()
   "Update issue at point"
