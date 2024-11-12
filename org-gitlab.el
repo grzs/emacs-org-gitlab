@@ -42,7 +42,9 @@
 
 ;;; dependencies
 (require 'org)
+(require 'org-element)
 (require 'url)
+(require 'request)
 (require 'cl-extra)
 
 ;;; helper functions
