@@ -6,7 +6,7 @@
 ;; Version: 0.8
 ;; Keywords: orgmode
 ;; URL: https://github.com/grzs/emacs-org-gitlab
-;; Package-Requires: ((org "9.7.15"))
+;; Package-Requires: ((org "9.6.15"))
 
 ;;; Commentary:
 
@@ -178,16 +178,16 @@
 (defun org-gitlab-set-web-url (url)
   "Set web URL as a property"
   (save-excursion
-    (when (org-gitlab--goto-title)
-      (org-entry-put (org-element-at-point) org-gitlab-property-web-url url)))
+    (when-let (title-begin (org-gitlab--get-title-begin))
+      (org-entry-put title-begin org-gitlab-property-web-url url)))
   url)
 
 (defun org-gitlab-set-assignee (assignee)
   "Set assignee a property"
   (let ((assignee (if (stringp assignee) assignee org-gitlab-username)))
     (save-excursion
-      (when (org-gitlab--goto-title)
-        (org-entry-put (org-element-at-point) org-gitlab-property-assignee assignee)))
+      (when-let (title-begin (org-gitlab--get-title-begin))
+        (org-entry-put title-begin org-gitlab-property-assignee assignee)))
     assignee))
 
 ;; effort estimate
