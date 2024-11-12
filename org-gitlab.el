@@ -6,6 +6,7 @@
 ;; Version: 0.8
 ;; Keywords: orgmode
 ;; URL: https://github.com/grzs/emacs-org-gitlab
+;; Package-Requires: ((org "9.7.15"))
 
 ;;; Commentary:
 
