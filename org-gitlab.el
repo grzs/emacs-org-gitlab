@@ -388,7 +388,7 @@
                                       pid iid)))
                     (org-gitlab--set-ids pid iid)
                     (if org-gitlab-bind-and-update (org-gitlab--update-issue data)
-                      (setq msg (concat msp " - no pull requested")))
+                      (setq msg (concat msg " - no pull requested")))
                     (message msg)))))))
 
 (defun org-gitlab-bind-by-title ()
