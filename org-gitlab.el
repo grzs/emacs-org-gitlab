@@ -320,8 +320,8 @@
   (interactive "sname: ")
   (request (org-gitlab--compose-url
             '("projects")
-            (list (cons "search" (url-encode-url name)) '("in" "name")))
-    :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+            (list (list "search" (url-encode-url name)) '("in" "name")))
+    :headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token)))
     :parser 'json-read
     :success (cl-function
 	      (lambda (&key data &allow-other-keys)
@@ -335,12 +335,12 @@
   "Update project info as file properties"
   (interactive)
   (let ((pid (org-gitlab-get-project-id)))
-    (request (org-gitlab--compose-url (list ("projects" pid))
-      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+    (request (org-gitlab--compose-url (list "projects" pid))
+      :headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token)))
       :parser 'json-read
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
-		  (org-gitlab--update-project-info data)))))))
+		  (org-gitlab--update-project-info data))))))
 
 (defun org-gitlab-update-all ()
   "Get issues assigned to user"
@@ -348,7 +348,7 @@
   (request (org-gitlab--compose-url
             (list "projects" (org-gitlab-get-project-id) "issues")
             '(("scope" "assigned_to_me") ("state" "opened")))
-    :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+    :headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token)))
     :parser 'json-read
     :success (cl-function
               (lambda (&key data &allow-other-keys)
@@ -359,7 +359,7 @@
   (interactive)
   (when-let ((issue-path (org-gitlab--get-issue-path)))
     (request (org-gitlab--compose-url issue-path)
-      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+      :headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token)))
       :parser 'json-read
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
@@ -370,7 +370,7 @@
   (interactive)
   (when-let ((issue-path (org-gitlab--get-issue-path)))
     (request (org-gitlab--compose-url issue-path)
-      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+      :headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token)))
       :parser 'json-read
       :success (cl-function
                 (lambda (&key data &allow-other-keys)
@@ -391,7 +391,7 @@
               '("issues")
               (list '("scope" "assigned_to_me")
                     (list "search" (url-encode-url title))))
-      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+      :headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token)))
       :parser 'json-read
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
@@ -416,7 +416,7 @@
                           (cons "description" description))))
     (request (org-gitlab--compose-url issue-path)
       :type "PUT"
-      :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+      :headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token))
 		     '("Content-Type" . "application/json"))
       :data (json-encode-alist data)
       :parser 'json-read
@@ -439,7 +439,7 @@
             (add-to-list 'data (cons "duration" (org-gitlab--parse-duration duration)))
             (request (org-gitlab--compose-url path-list)
               :type "POST"
-              :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+              :headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token))
 	                     '("Content-Type" . "application/json"))
               :data (json-encode data)
               :parser 'json-read
@@ -471,7 +471,7 @@
       (request (org-gitlab--compose-url
                 (append (org-gitlab--get-issue-path) '("time_estimate")))
 	:type "POST"
-	:headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+	:headers (list (cons "PRIVATE-TOKEN" (org-gitlab--get-token))
 		       '("Content-Type" . "application/json"))
 	:data (json-encode (list (cons "duration" (format "%dm" duration))))
 	:parser 'json-read
