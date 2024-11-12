@@ -113,7 +113,7 @@
   (goto-char (point-min))
   (when (search-forward-regexp "#\\+TITLE:" nil t)
     (if (search-forward-regexp "#\\+TODO:" nil t) (delete-line)
-      (next-line))
+      (forward-line))
     (insert org-gitlab-keyword-todo)
     (newline)))
 
@@ -194,7 +194,7 @@
   "get effort estimate in minutes"
   (when-let ((title-begin (org-gitlab--get-title-begin)))
     (when-let ((effort-string (org-entry-get title-begin org-effort-property)))
-      (org-duration-string-to-minutes effort-string))))
+      (org-duration-to-minutes effort-string))))
 
 (defun org-gitlab-set-effort (minutes)
   "set effort estimate to MINUTES"
@@ -219,7 +219,7 @@
   (when (stringp description)
     (save-excursion
       (if (org-gitlab--goto-description-block)
-          (or (previous-line)
+          (or (forward-line -1)
               (delete-region
                (point) (org-element-property :end (org-element-at-point))))
         (org-end-of-meta-data))
