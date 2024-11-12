@@ -3,7 +3,7 @@
 ;; Copyright (C) 2023 Janos Gerzson
 
 ;; Author: Janos Gerzson <gerzsonj@gmail.com>
-;; Version: 0.3
+;; Version: 0.8
 ;; Keywords: orgmode
 ;; URL: https://github.com/grzs/emacs-org-gitlab
 
@@ -39,6 +39,11 @@
 
 (defvar org-gitlab-bind-and-update t
   "when non NIL, update issue after successful bind")
+
+;;; dependencies
+(require 'org)
+(require 'url)
+(require 'cl-extra)
 
 ;;; helper functions
 
@@ -90,7 +95,7 @@
   (unless title (setq title (read-string "title: ")))
   (unless (string-equal title (org-get-title))
     (save-excursion
-      (beginning-of-buffer) (or (org-goto-first-child) (end-of-buffer))
+      (goto-char (point-min)) (or (org-goto-first-child) (goto-char (point-max)))
       (search-backward-regexp "^#\\+TITLE:" nil t)
       (when (and (org-at-keyword-p)
                  (string-equal "TITLE" (org-element-property :key (org-element-at-point))))
@@ -103,7 +108,7 @@
 
 (defun org-gitlab--set-todo-keywords ()
   (save-excursion)
-  (beginning-of-buffer)
+  (goto-char (point-min))
   (when (search-forward-regexp "#\\+TITLE:" nil t)
     (if (search-forward-regexp "#\\+TODO:" nil t) (delete-line)
       (next-line))
@@ -300,7 +305,7 @@
  (save-excursion
     (if-let ((heading-pos (org-find-property org-gitlab-property-iid iid)))
         (goto-char heading-pos)
-      (end-of-buffer) (end-of-line)
+      (goto-char (point-max)) (end-of-line)
       (unless (eq (point) (save-excursion (beginning-of-line) (point))) (newline))
       (org-insert-heading)
       (org-entry-put (point) org-gitlab-property-iid iid))
