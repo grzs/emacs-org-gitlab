@@ -220,9 +220,9 @@
   (when (stringp description)
     (save-excursion
       (if (org-gitlab--goto-description-block)
-          (or (forward-line -1)
-              (delete-region
-               (point) (org-element-property :end (org-element-at-point))))
+          (progn (forward-line -1)
+                 (delete-region
+                  (point) (org-element-property :end (org-element-at-point))))
         (org-end-of-meta-data))
       (insert org-gitlab-description-block-header) (newline)
       (insert org-gitlab-description-block-begin) (newline)
