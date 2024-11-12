@@ -13,11 +13,9 @@
 ;; with a GitLab issue. Currently supported properties:
 ;; title, description, time_estimate, time_spent
 
-(defvar org-gitlab-base-url nil "Gitlab server URL")
+(defvar org-gitlab-url nil "Gitlab server URL")
 (defvar org-gitlab-username nil "Gitlab user name")
-(defconst org-gitlab-token
-  (alist-get 'org-sync-gitlab-auth-token safe-local-variable-values)
-  "Get gitlab token from safe-local-variable-values")
+(defconst org-gitlab-base-path "/api/v4")
 
 (defconst org-gitlab-keyword-todo "#+TODO: TODO IN_PROGRESS | TO_REVIEW DONE"
   "Gitlab issue states")
@@ -58,7 +56,8 @@
       (if (eq (org-element-type headline) 'headline) headline
         (let ((headline (org-element-at-point)))
           ;; last empty line after last headline
-          (if (and (eq (org-element-type headline) 'headline) (eq (org-outline-level) 1)) headline
+          (if (and (eq (org-element-type headline) 'headline) (eq (org-outline-level) 1))
+              headline
             (error "Couldn't find title")))))))
 
 (defun org-gitlab--get-title-begin ()
@@ -227,35 +226,58 @@
   (interactive)
   (when (org-gitlab--goto-description-block) (org-edit-src-code)))
 
+;; token helper
+(defun org-gitlab--get-token ()
+  (let* ((auth-source-creation-prompts
+          '((secret . "Private Access Token for %u@%h: ")))
+         (url-struct (url-generic-parse-url org-gitlab-url))
+         (secret (car
+                  (auth-source-search :host (cl-struct-slot-value 'url 'host url-struct)
+                                      :port (cl-struct-slot-value 'url 'type url-struct)
+                                      :user org-gitlab-username
+                                      :max 1
+                                      :require '(:secret)
+                                      :create t
+                                      :type 'netrc))))
+    (unless secret
+      (error "Couldn't find or ask for token ..."))
+
+    ;; save token if necessary
+    (when-let ((save-function (plist-get secret :save-function)))
+      (funcall save-function))
+
+    ;; return token
+    (auth-info-password secret)))
+
 ;; url helper
-(defun org-gitlab--compose-url (&optional path query-params-alist)
-  (let* ((url-struct (url-generic-parse-url org-gitlab-base-url))
-         (path-and-query (url-path-and-query url-struct))
-         (path-list (string-split (car path-and-query) "/"))
-         (path (string-join
-                (if (stringp path)
-                    (append path-list (string-split path "/" t))
-                  path-list)
-                "/"))
-         (query-string (cdr path-and-query))
+(defun org-gitlab--compose-url (&optional path-list query-params-alist)
+  (let* ((url-struct (url-generic-parse-url org-gitlab-url))
+         (path (if (listp path-list)
+                   (string-join
+                    (append (string-split org-gitlab-base-path "/") path-list)
+                    "/")
+                org-gitlab-base-path))
+         (query-string (cdr (url-path-and-query url-struct)))
          (query-params-alist-combined
           (if (eq 0 (length query-string)) query-params-alist
             (append (url-parse-query-string query-string) query-params-alist))))
     (when query-params-alist-combined
       (setq query-string (url-build-query-string query-params-alist-combined)))
+
     (setf (url-filename url-struct)
           (if (eq 0 (length query-string)) path
             (string-join (list path query-string) "?")))
+
     (url-recreate-url url-struct)))
 
-(defun org-gitlab--get-issue-path (subresources)
+(defun org-gitlab--get-issue-path ()
   "get issue API url"
   (let ((title-begin (org-gitlab--get-title-begin)))
     (when title-begin
       (let ((pid (org-gitlab-get-project-id))
             (iid (org-gitlab-get-iid)))
         (when (and pid iid)
-	  (string-join (append (list "projects" pid "issues" iid) subresources) "/"))))))
+	  (list "projects" pid "issues" iid))))))
 
 ;; callback helpers
 (defun org-gitlab--set-ids (pid iid)
@@ -297,7 +319,7 @@
   "Search project by name, update if found only one"
   (interactive "sname: ")
   (request (org-gitlab--compose-url
-            "/projects"
+            '("projects")
             (list (cons "search" (url-encode-url name)) '("in" "name")))
     :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
     :parser 'json-read
@@ -313,7 +335,7 @@
   "Update project info as file properties"
   (interactive)
   (let ((pid (org-gitlab-get-project-id)))
-    (request (org-gitlab--compose-url (string-join ("projects" pid) "/"))
+    (request (org-gitlab--compose-url (list ("projects" pid))
       :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
       :parser 'json-read
       :success (cl-function
@@ -323,18 +345,14 @@
 (defun org-gitlab-update-all ()
   "Get issues assigned to user"
   (interactive)
-  (unless org-gitlab-username
-    (error "org-gitlab-username is unset"))
-  (let* ((path (string-join (list "projects" (org-gitlab-get-project-id) "issues") "/"))
-         (query-params (list (list "assignee_username" org-gitlab-username)
-                             '("state" "opened")))
-         (url (org-gitlab--compose-url path query-params)))
-    (request url
-     :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
-     :parser 'json-read
-     :success (cl-function
-               (lambda (&key data &allow-other-keys)
-                 (org-gitlab--update-issues data))))))
+  (request (org-gitlab--compose-url
+            (list "projects" (org-gitlab-get-project-id) "issues")
+            '(("scope" "assigned_to_me") ("state" "opened")))
+    :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
+    :parser 'json-read
+    :success (cl-function
+              (lambda (&key data &allow-other-keys)
+                (org-gitlab--update-issues data))))))
 
 (defun org-gitlab-pull ()
   "Update issue at point"
@@ -358,7 +376,8 @@
                 (lambda (&key data &allow-other-keys)
                   (let* ((pid (number-to-string (alist-get 'project_id data)))
                          (iid (number-to-string (alist-get 'iid data)))
-                         (msg (format "Issue has bound successfully (pid: %s, iid: %s)" pid iid)))
+                         (msg (format "Issue has bound successfully (pid: %s, iid: %s)"
+                                      pid iid)))
                     (org-gitlab--set-ids pid iid)
                     (if org-gitlab-bind-and-update (org-gitlab--update-issue data)
                       (setq msg (concat msp " - no pull requested")))
@@ -367,10 +386,11 @@
 (defun org-gitlab-bind-by-title ()
   "Search by title and set ids if found only one"
   (interactive)
-  (when-let* ((title (org-gitlab-get-title))
-              (url (format "%s/issues?scope=assigned_to_me&search=%s&in=title"
-                           org-gitlab-base-url (url-encode-url title))))
-    (request url
+  (when-let ((title (org-gitlab-get-title)))
+    (request (org-gitlab--compose-url
+              '("issues")
+              (list '("scope" "assigned_to_me")
+                    (list "search" (url-encode-url title))))
       :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token))
       :parser 'json-read
       :success (cl-function
@@ -412,12 +432,12 @@
   (if (org-at-clock-log-p)
       (if-let ((summary (org-gitlab--get-heading-title))
                (duration (org-element-property :duration (org-element-at-point))))
-          (let ((path (org-gitlab--get-issue-path '("add_spent_time")))
+          (let ((path-list (append (org-gitlab--get-issue-path) '("add_spent_time")))
 	        (data))
             (message (format "/spent %s hour(s) on: %s" duration summary))
             (add-to-list 'data (cons "summary" summary))
             (add-to-list 'data (cons "duration" (org-gitlab--parse-duration duration)))
-            (request (org-gitlab--compose-url path)
+            (request (org-gitlab--compose-url path-list)
               :type "POST"
               :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
 	                     '("Content-Type" . "application/json"))
@@ -447,19 +467,18 @@
 (defun org-gitlab-estimate-push ()
   "Push estimate"
   (interactive)
-  (let ((path (org-gitlab--get-issue-path '("time_estimate")))
-	(duration (org-gitlab-get-effort)))
-    (if duration
-	(request (org-gitlab--compose-url path)
-	  :type "POST"
-	  :headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
-			 '("Content-Type" . "application/json"))
-	  :data (json-encode (list (cons "duration" (format "%dm" duration))))
-	  :parser 'json-read
-	  :success (cl-function
-		    (lambda (&key data &allow-other-keys)
-		      (message (format "Estimated time: %s"
-                                       (alist-get 'human_time_estimate data))))))
-      (message "Effort estimate is not set"))))
+  (if-let ((duration (org-gitlab-get-effort)))
+      (request (org-gitlab--compose-url
+                (append (org-gitlab--get-issue-path) '("time_estimate")))
+	:type "POST"
+	:headers (list (cons "PRIVATE-TOKEN" org-gitlab-token)
+		       '("Content-Type" . "application/json"))
+	:data (json-encode (list (cons "duration" (format "%dm" duration))))
+	:parser 'json-read
+	:success (cl-function
+		  (lambda (&key data &allow-other-keys)
+		    (message (format "Estimated time: %s"
+                                     (alist-get 'human_time_estimate data))))))
+    (message "Effort estimate is not set")))
 
 (provide 'org-gitlab)
