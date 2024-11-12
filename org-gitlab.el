@@ -404,7 +404,7 @@
       :success (cl-function
 		(lambda (&key data &allow-other-keys)
 		  (if (length= data 1)
-                      (let (data0 (elt data 0))
+                      (let ((data0 (elt data 0)))
 		        (org-gitlab--set-ids
 		         (number-to-string (alist-get 'project_id data))
 		         (number-to-string (alist-get 'iid data)))
